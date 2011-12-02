@@ -59,9 +59,6 @@ struct Predictor
 };
 static Predictor<NumberT,kStDim> g_predictor;
 
-
-
-
 template <typename  Number,unsigned dim_st,unsigned dim_obs>
 struct Observer
 {
@@ -90,80 +87,76 @@ void computeMatSqrt(const Matrix &in, Matrix &sqrt)
 }
 
 template <typename Number,unsigned dim>
-void GenerateX(const Gaussian<Number,dim> &x,
-               Matrix<Number,dim,2*dim+1> &X)
+void GeneratePoints(const Gaussian<Number,dim> &g,
+               Matrix<Number,dim,2*dim+1> &points)
 {
-    X.col(0) = x.mean_;
-    auto tmp_mat = ((dim+klam)*x.covar_);
+    points.col(0) = g.mean_;
+    auto tmp_mat = ((dim+klam)*g.covar_);
     for(unsigned i=0;i<dim;++i)
         {
-            X.col(i+1) = x.mean_ + tmp_mat.col(i);
-            X.col(i+1+dim) = x.mean_ - tmp_mat.col(i);
+            points.col(i+1) = g.mean_ + tmp_mat.col(i);
+            points.col(i+1+dim) = g.mean_ - tmp_mat.col(i);
         }
 }
 
 
 template<typename Number,unsigned dim_in,unsigned dim_out>
-void EstimateYmeanCovar(const Matrix<Number,dim_out,2*dim_in+1> &Y,
-                        Gaussian<Number,dim_out> &y)
+void EstimateGaussian(const Matrix<Number,dim_out,2*dim_in+1> &points,
+                        Gaussian<Number,dim_out> &g)
 {
-    y.mean_ = (klam/(dim_in+klam))*Y.col(0);
+    g.mean_ = (klam/(dim_in+klam))*points.col(0);
     Number W = 1/(2*(dim_in+klam));
     for(unsigned i=1;i<2*dim_in+1;++i)
-        y.mean_ += W*Y.col(i);
+        g.mean_ += W*points.col(i);
     Number W0 =((klam/dim_in+klam)+(1+kb-ka*ka));
-    y.covar_ = W0*((Y.col(0)-y.mean_)*(Y.col(0)-y.mean_).transpose());
+    g.covar_ = W0*((points.col(0)-g.mean_)*(points.col(0)-g.mean_).transpose());
     for(unsigned i=1;i<2*dim_in+1;++i)
-        y.covar_ += W*((Y.col(i)-y.mean_)*(Y.col(i)-y.mean_).transpose());
+        g.covar_ += W*((points.col(i)-g.mean_)*(points.col(i)-g.mean_).transpose());
 }
 
 template<typename Number,unsigned dim_in,unsigned dim_out>
-void EstimateCrossCovar(const Matrix<Number,dim_in,1> &x_mean,
-                        const Matrix<Number,dim_in,2*(dim_in+dim_out)+1> &X,
-                        Matrix<Number,dim_out,1> &y_mean,
-                        Matrix<Number,dim_out,2*(dim_in+dim_out)+1> &Y,
-                        Matrix<Number,dim_in,dim_out> &xy_cross)
+void EstimateCrossCovar(const Matrix<Number,dim_in,1> &in_mean,
+                        const Matrix<Number,dim_in,2*(dim_in+dim_out)+1> &in_points,
+                        Matrix<Number,dim_out,1> &out_mean,
+                        Matrix<Number,dim_out,2*(dim_in+dim_out)+1> &out_points,
+                        Matrix<Number,dim_in,dim_out> &in_out_cross)
 {
     Number W = 1/(2*(dim_in+klam));
     Number W0 =((klam/dim_in+klam)+(1+kb-ka*ka));
-    xy_cross = W0*((X.col(0)-x_mean)*(Y.col(0)-y_mean).transpose());
+    in_out_cross = W0*((in_points.col(0)-in_mean)*(out_points.col(0)-out_mean).transpose());
     for(unsigned i=1;i<2*dim_in+1;++i)
-      xy_cross += W*((X.col(i)-x_mean)*(Y.col(i)-y_mean).transpose());
+      in_out_cross += W*((in_points.col(i)-in_mean)*(in_points.col(i)-in_mean).transpose());
 }
 
-// template<typename Number,unsigned dim_in,unsigned dim_out>
-// void Propagate(const Matrix<Number,dim_in,2*dim_in+1> &X,
-//                Matrix<Number,dim_out,2*dim_in+1> &Y)
-
 template<typename Number,unsigned dim_in,unsigned dim_out>
-void ComputeUT(const Gaussian<Number,dim_in> &x,
+void ComputeUT(const Gaussian<Number,dim_in> &in,
                const std::function<Matrix<Number,dim_out,1>(Matrix<Number,dim_in,1>) > &propagate,
-               Gaussian<Number,dim_out> &y,
-               Matrix<Number,dim_in,2*dim_in+1> &x_points,
-               Matrix<Number,dim_out,2*dim_in+1> &y_points)
+               Gaussian<Number,dim_out> &out,
+               Matrix<Number,dim_in,2*dim_in+1> &in_points,
+               Matrix<Number,dim_out,2*dim_in+1> &out_points)
 {
-    GenerateX<Number,dim_in>(x,x_points);
-    std::cout <<  "xpoints:" << std::endl << x_points << std::endl;
+    GeneratePoints<Number,dim_in>(in,in_points);
+    std::cout <<  "xpoints:" << std::endl << in_points << std::endl;
     for(unsigned i=0;i<2*dim_in+1;++i)
-        y_points.col(i) = propagate(x_points.col(i));
+        out_points.col(i) = propagate(in_points.col(i));
     //    Propagate<Number,dim_in,dim_out>(x_points,y_points);
-    EstimateYmeanCovar<Number,dim_in,dim_out>(y_points,y);
+    EstimateGaussian<Number,dim_in,dim_out>(out_points,out);
 }
 
 template<typename Number,unsigned dim_in,unsigned dim_out>
-void process(const Gaussian<Number,dim_in> &x,
-             const Gaussian<Number,dim_out> &w,
-             const std::function<Matrix<Number,dim_out,1>(Matrix<Number,dim_in+dim_out,1>) > &propagate,
-             Gaussian<Number,dim_out> &x_proc,
-             Matrix<Number,dim_in+dim_out,2*(dim_in+dim_out)+1> &x_points,
-             Matrix<Number,dim_out,2*(dim_in+dim_out)+1> &y_points)
+void ComputeExtUT(const Gaussian<Number,dim_in> &in,
+                  const Gaussian<Number,dim_out> &out_noise,
+                  const std::function<Matrix<Number,dim_out,1>(Matrix<Number,dim_in+dim_out,1>) > &propagate,
+                  Gaussian<Number,dim_out> &out,
+                  Matrix<Number,dim_in+dim_out,2*(dim_in+dim_out)+1> &in_points,
+                  Matrix<Number,dim_out,2*(dim_in+dim_out)+1> &out_points)
 {
     Gaussian<Number,dim_in+dim_out> x_ext(0);
-    x_ext.mean_ << x.mean_,w.mean_;
-    x_ext.covar_.topLeftCorner(dim_in,dim_in) = x.covar_;
-    x_ext.covar_.bottomRightCorner(dim_out,dim_out) = w.covar_;
+    x_ext.mean_ << in.mean_,out_noise.mean_;
+    x_ext.covar_.topLeftCorner(dim_in,dim_in) = in.covar_;
+    x_ext.covar_.bottomRightCorner(dim_out,dim_out) = out_noise.covar_;
     std::cout <<  "x_ext:" << std::endl << x_ext << std::endl;
-    ComputeUT<Number,dim_in+dim_out,dim_out>(x_ext,propagate,x_proc,x_points,y_points);
+    ComputeUT<Number,dim_in+dim_out,dim_out>(x_ext,propagate,out,in_points,out_points);
 }
 
 template<typename Number,unsigned dim_st,unsigned dim_obs>
@@ -180,9 +173,9 @@ public:
 
     Gaussian<Number,dim_st> & step(const Matrix<Number,dim_obs,1> &z)
     {
-        process<Number,dim_st,dim_st>(x_,w_,predictor_,x_pred_,x_w_points_,x_pred_points_);
+        ComputeExtUT<Number,dim_st,dim_st>(x_,w_,predictor_,x_pred_,x_w_points_,x_pred_points_);
         std::cout << "x_pred:" << std::endl << x_pred_ << std::endl;
-        process<Number,dim_st,dim_obs>(x_pred_,v_,observer_,z_hat_,x_v_points_,z_hat_points_);
+        ComputeExtUT<Number,dim_st,dim_obs>(x_pred_,v_,observer_,z_hat_,x_v_points_,z_hat_points_);
         std::cout << "z_hat:" << std::endl << z_hat_ << std::endl;
 
         EstimateCrossCovar<Number,dim_st,dim_obs>(x_pred_.mean_,
